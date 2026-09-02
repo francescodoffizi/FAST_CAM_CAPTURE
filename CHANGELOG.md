@@ -37,3 +37,13 @@ I rilasci verranno versionati in occasione del Version Bump.
   - Redatto `integration_plan.md` con guida completa all'integrazione del demone e del bridge client C++ in Overdrive.
   - Compilata la libreria condivisa client `build/libfast_cam_client.so` e definito l'header pubblico `include/fast_cam_bridge.h` per consentire ai maintainer di integrare lo stream a zero-copy senza esporre i sorgenti del demone.
   - Pulizia completata su target `/data/local/tmp/`: rimossi i video raw temporanei (2,4 GB liberati) e i file obsoleti (`qcarcam_test`, `libhook_qcarcam.so`, `dilink5_cam_sidecar`, `4cam.xml`), mantenendo esclusivamente il nuovo binario nativo `fast_cam_capture`.
+- Hardening, Protezione Anti-Reverse Engineering & Versioning Git:
+  - Inizializzato repository Git con due release versionate:
+    - `v1.0.0-clean`: Versione sorgente pulita e non offuscata.
+    - `v1.0.0-hardened`: Versione di produzione protetta e offuscata.
+  - Implementato modulo di sicurezza `obfuscate.h`:
+    - Cifratura XOR delle stringhe a runtime con barriere volatili (zero riferimenti a `qcarcam`, `libais`, `/dev/ion`, socket nei comandi `strings`).
+    - Calcolo opaco a runtime delle costanti hardware proprietarie (`0x7080102`, `0x2000000`, `0x4643414D`).
+    - Hook di protezione anti-debug (`/proc/self/status` TracerPid check).
+    - Strip aggressivo di tutti i simboli interni con `llvm-strip --strip-all --discard-all` nel target `make release`.
+    - Validata l'esecuzione sul veicolo reale a 30 FPS su telecamera singola e 121 FPS su 4 telecamere.
