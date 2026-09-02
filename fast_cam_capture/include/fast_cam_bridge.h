@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 
+#define FAST_CAM_API __attribute__((visibility("default")))
+
 typedef struct {
     uint32_t cam_id;        // 0: Front, 1: Right, 2: Rear, 3: Left
     uint32_t width;         // 1920
@@ -18,14 +20,14 @@ typedef struct {
 // Client handle opaque structure
 typedef struct FastCamClientCtx FastCamClientCtx;
 
-FastCamClientCtx* fast_cam_client_create(void);
-void fast_cam_client_destroy(FastCamClientCtx* ctx);
+FAST_CAM_API FastCamClientCtx* fast_cam_client_create(void);
+FAST_CAM_API void fast_cam_client_destroy(FastCamClientCtx* ctx);
 
-bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path);
-void fast_cam_client_disconnect(FastCamClientCtx* ctx);
+FAST_CAM_API bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path);
+FAST_CAM_API void fast_cam_client_disconnect(FastCamClientCtx* ctx);
 
 // Waits for the next hardware frame from any active camera (timeout in milliseconds)
-bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, int timeout_ms);
+FAST_CAM_API bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, int timeout_ms);
 
 #ifdef __cplusplus
 }

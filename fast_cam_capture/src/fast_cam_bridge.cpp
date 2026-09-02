@@ -1,6 +1,7 @@
 #include "fast_cam_bridge.h"
 #include "fast_cam_ipc.h"
 #include "fd_passing.h"
+#include "obfuscate.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,7 +73,7 @@ bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path) {
     int num_received = 0;
     int rc = recv_fds(ctx->sock_fd, ctx->received_fds, FAST_CAM_MAX_TOTAL_BUFS,
                       &num_received, &ctx->handshake, sizeof(ctx->handshake));
-    if (rc <= 0 || ctx->handshake.magic != FAST_CAM_MAGIC) {
+    if (rc <= 0 || ctx->handshake.magic != op_fcam_magic()) {
         fast_cam_client_disconnect(ctx);
         return false;
     }
@@ -100,7 +101,7 @@ bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, 
 
     fast_cam_frame_msg_t msg;
     ssize_t n = recv(ctx->sock_fd, &msg, sizeof(msg), MSG_WAITALL);
-    if (n != sizeof(msg) || msg.magic != FAST_CAM_MAGIC) return false;
+    if (n != sizeof(msg) || msg.magic != op_fcam_magic()) return false;
 
     // Find the stream matching msg.cam_id
     uint32_t fd_idx = 0;
