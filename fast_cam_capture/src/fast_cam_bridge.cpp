@@ -61,9 +61,39 @@ bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path) {
     struct sockaddr_un saddr;
     memset(&saddr, 0, sizeof(saddr));
     saddr.sun_family = AF_UNIX;
-    strncpy(saddr.sun_path, sock_path, sizeof(saddr.sun_path) - 1);
+    socklen_t slen = 0;
+    bool connected = false;
 
-    if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, sizeof(saddr)) < 0) {
+    // 1. Connection attempt to provided path (abstract if starts with '@')
+    if (sock_path && sock_path[0] == '@') {
+        saddr.sun_path[0] = '\0';
+        strncpy(saddr.sun_path + 1, sock_path + 1, sizeof(saddr.sun_path) - 2);
+        slen = sizeof(sa_family_t) + strlen(sock_path);
+        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) {
+            connected = true;
+        }
+    } else if (sock_path) {
+        strncpy(saddr.sun_path, sock_path, sizeof(saddr.sun_path) - 1);
+        slen = sizeof(sa_family_t) + strlen(saddr.sun_path) + 1;
+        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) {
+            connected = true;
+        }
+    }
+
+    // 2. Automatic fallback to abstract socket @fast_cam.sock if filesystem socket was blocked by SELinux
+    if (!connected) {
+        memset(&saddr, 0, sizeof(saddr));
+        saddr.sun_family = AF_UNIX;
+        const char* abs_name = "fast_cam.sock";
+        saddr.sun_path[0] = '\0';
+        memcpy(saddr.sun_path + 1, abs_name, strlen(abs_name));
+        slen = sizeof(sa_family_t) + 1 + strlen(abs_name);
+        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) {
+            connected = true;
+        }
+    }
+
+    if (!connected) {
         close(ctx->sock_fd);
         ctx->sock_fd = -1;
         return false;

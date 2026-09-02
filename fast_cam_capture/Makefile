@@ -26,8 +26,8 @@ $(CLIENT_TARGET): src/fast_cam_client.c
 
 $(LIB_TARGET): src/fast_cam_bridge.cpp
 	@mkdir -p build
-	$(CXX) $(CXXFLAGS) -shared $^ -o $@
-	@echo "[+] Built shared library: $@"
+	$(CXX) $(CXXFLAGS) -shared -Wl,-soname,libfast_cam_client.so $^ -o $@
+	@echo "[+] Built shared library with SONAME: $@"
 
 # Hardened release build: aggressive stripping of all symbols, debug sections, and symbol tables
 release: all

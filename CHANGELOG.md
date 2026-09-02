@@ -47,3 +47,8 @@ I rilasci verranno versionati in occasione del Version Bump.
     - Hook di protezione anti-debug (`/proc/self/status` TracerPid check).
     - Strip aggressivo di tutti i simboli interni con `llvm-strip --strip-all --discard-all` nel target `make release`.
     - Validata l'esecuzione sul veicolo reale a 30 FPS su telecamera singola e 121 FPS su 4 telecamere.
+- Integrazione Correzioni Operative (`nec_mods.md`):
+  - Supporto Abstract UNIX Domain Socket (`@fast_cam.sock`) e fallback automatico in `main.c` e `fast_cam_bridge.cpp` per bypassare le restrizioni SELinux Enforcing.
+  - Esecuzione continua di default (`duration_sec = 0`) per funzionamento ininterrotto come demone di background.
+  - Aggiunto `-Wl,-soname,libfast_cam_client.so` nel `Makefile` per evitare path assoluti macOS in `DT_NEEDED`.
+  - Aggiornato `integration_plan.md` con la gestione della modalità Mosaico 2x2 (`desired_cam == 4`) e il compositore UYVY per Overdrive.
