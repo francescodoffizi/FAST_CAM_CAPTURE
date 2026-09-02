@@ -177,10 +177,11 @@ static void compose_2x2_uyvy(
 int main(int argc, char* argv[]) {
     int single_cam = 0;
     bool all_cams = false;
-    int duration_sec = 10;
+    int duration_sec = 0; // Default: continuous daemon execution
     int record_fps = 30;
     const char* record_file = NULL;
     const char* grid_file = NULL;
+    const char* sock_path = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
@@ -196,14 +197,17 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--grid2x2") == 0 && i + 1 < argc) {
             grid_file = argv[++i];
             all_cams = true;
+        } else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
+            sock_path = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: %s [options]\n", argv[0]);
             printf("  --cam <id>        Camera ID to capture [default: 0]\n");
             printf("  --all             Open all 4 cameras (0:Front, 1:Right, 2:Rear, 3:Left)\n");
             printf("  --grid2x2 <file>  Compose and record 4 cameras into 2x2 grid video (1920x1300)\n");
-            printf("  --time <sec>      Duration in seconds [default: 10]\n");
+            printf("  --time <sec>      Duration in seconds (0 = continuous daemon) [default: 0]\n");
             printf("  --fps <fps>       Target recording FPS (1..30) [default: 30]\n");
             printf("  --record <file>   Record stream to raw UYVY video file\n");
+            printf("  --socket <path>   IPC socket path or @abstract_name\n");
             return 0;
         }
     }
@@ -339,22 +343,65 @@ int main(int argc, char* argv[]) {
         printf("[+] Camera %d started OK! (Handle: %p)\n", cid, channels[i].hndl);
     }
 
-    // 3. Setup Zero-Copy IPC Server Socket
+    // 3. Setup Zero-Copy IPC Server Socket (with Abstract Socket & SELinux Fallback)
     int ipc_server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
     int ipc_client_sock = -1;
+    bool is_abstract_sock = false;
+    char bound_sock_path[108] = {0};
+
     if (ipc_server_sock >= 0) {
         struct sockaddr_un saddr;
         memset(&saddr, 0, sizeof(saddr));
         saddr.sun_family = AF_UNIX;
-        char s_sock[64];
-        DECRYPT_STR(ENC__data_local_tmp_fast_cam_sock, s_sock);
-        strncpy(saddr.sun_path, s_sock, sizeof(saddr.sun_path) - 1);
-        unlink(s_sock);
-        memset(s_sock, 0, sizeof(s_sock));
-        if (bind(ipc_server_sock, (struct sockaddr*)&saddr, sizeof(saddr)) == 0) {
-            listen(ipc_server_sock, 1);
+        socklen_t slen = 0;
+        bool bound = false;
+
+        char default_sock[64];
+        DECRYPT_STR(ENC__data_local_tmp_fast_cam_sock, default_sock);
+        const char* target_path = sock_path ? sock_path : default_sock;
+
+        if (target_path[0] == '@') {
+            is_abstract_sock = true;
+            saddr.sun_path[0] = '\0';
+            strncpy(saddr.sun_path + 1, target_path + 1, sizeof(saddr.sun_path) - 2);
+            slen = sizeof(sa_family_t) + strlen(target_path);
+            if (bind(ipc_server_sock, (struct sockaddr*)&saddr, slen) == 0) {
+                bound = true;
+                strncpy(bound_sock_path, target_path, sizeof(bound_sock_path) - 1);
+            }
+        } else {
+            strncpy(saddr.sun_path, target_path, sizeof(saddr.sun_path) - 1);
+            unlink(target_path);
+            slen = sizeof(sa_family_t) + strlen(saddr.sun_path) + 1;
+            if (bind(ipc_server_sock, (struct sockaddr*)&saddr, slen) == 0) {
+                bound = true;
+                strncpy(bound_sock_path, target_path, sizeof(bound_sock_path) - 1);
+            }
+        }
+
+        // Automatic fallback on abstract socket @fast_cam.sock if filesystem socket failed (e.g. SELinux Enforcing)
+        if (!bound) {
+            memset(&saddr, 0, sizeof(saddr));
+            saddr.sun_family = AF_UNIX;
+            const char* abs_name = "fast_cam.sock";
+            saddr.sun_path[0] = '\0';
+            memcpy(saddr.sun_path + 1, abs_name, strlen(abs_name));
+            slen = sizeof(sa_family_t) + 1 + strlen(abs_name);
+            if (bind(ipc_server_sock, (struct sockaddr*)&saddr, slen) == 0) {
+                bound = true;
+                is_abstract_sock = true;
+                snprintf(bound_sock_path, sizeof(bound_sock_path), "@%s", abs_name);
+            } else {
+                fprintf(stderr, "[-] Failed to bind abstract socket @%s: %s\n", abs_name, strerror(errno));
+            }
+        }
+
+        memset(default_sock, 0, sizeof(default_sock));
+
+        if (bound) {
+            listen(ipc_server_sock, 2);
             fcntl(ipc_server_sock, F_SETFL, O_NONBLOCK);
-            printf("[+] Zero-Copy Multi-Channel IPC Server initialized.\n");
+            printf("[+] Zero-Copy Multi-Channel IPC Server initialized (%s)\n", bound_sock_path);
         }
     }
 
@@ -536,9 +583,9 @@ int main(int argc, char* argv[]) {
     if (ipc_client_sock >= 0) close(ipc_client_sock);
     if (ipc_server_sock >= 0) {
         close(ipc_server_sock);
-        char s_sock[64];
-        unlink(DECRYPT_STR(ENC__data_local_tmp_fast_cam_sock, s_sock));
-        memset(s_sock, 0, sizeof(s_sock));
+        if (!is_abstract_sock && bound_sock_path[0] != '\0') {
+            unlink(bound_sock_path);
+        }
     }
 
     qcarcam_uninitialize();
