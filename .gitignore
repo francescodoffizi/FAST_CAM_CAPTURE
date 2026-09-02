@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+
+# Video and raw capture files
+*.uyvy
+*.mp4
+*.png
+*.jpg
+*.raw
+output/
+fast_cam_capture/output/
+
+# macOS metadata
+.DS_Store
+
+# Temporary files
+*.log
+*.tmp
