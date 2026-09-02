@@ -18,6 +18,7 @@
 #include "qcarcam_types.h"
 #include "fast_cam_ipc.h"
 #include "fd_passing.h"
+#include "obfuscate.h"
 
 #define FRAME_W       1920
 #define FRAME_H       1300
@@ -37,12 +38,6 @@ struct IonAllocData {
 #define ION_IOC_MAGIC   'I'
 #define ION_IOC_ALLOC   _IOWR(ION_IOC_MAGIC, 0, struct IonAllocData)
 
-static const uint32_t ION_HEAP_MASKS[] = {
-    1u << 25,  // ION_SYSTEM_HEAP_ID (0x2000000)
-    1u << 1,   // ION_SYSTEM_CONTIG_HEAP_ID
-    1u << 8,   // ION_ADSP_HEAP_ID
-    0x7080102,
-};
 
 static volatile bool g_running = true;
 
@@ -58,10 +53,9 @@ static uint64_t get_time_ns(void) {
 }
 
 static int ion_open(void) {
-    int fd = open("/dev/ion", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) {
-        fprintf(stderr, "[-] Failed to open /dev/ion: %s\n", strerror(errno));
-    }
+    char s_dev[16];
+    int fd = open(DECRYPT_STR(ENC__dev_ion, s_dev), O_RDONLY | O_CLOEXEC);
+    memset(s_dev, 0, sizeof(s_dev));
     return fd;
 }
 
@@ -74,11 +68,15 @@ static int ion_alloc_buf(int ion_fd, size_t len, void** out_ptr) {
         return -1;
     }
 
-    for (size_t i = 0; i < sizeof(ION_HEAP_MASKS)/sizeof(ION_HEAP_MASKS[0]); i++) {
+    uint32_t masks[2];
+    masks[0] = op_ion_heap_system();
+    masks[1] = 1u << 1;
+
+    for (size_t i = 0; i < 2; i++) {
         struct IonAllocData ad;
         memset(&ad, 0, sizeof(ad));
         ad.len          = (uint64_t)len;
-        ad.heap_id_mask = ION_HEAP_MASKS[i];
+        ad.heap_id_mask = masks[i];
         ad.flags        = 1; // ION_FLAG_CACHED
 
         if (ioctl(ion_fd, ION_IOC_ALLOC, &ad) < 0) {
@@ -239,37 +237,46 @@ int main(int argc, char* argv[]) {
     printf(" Duration      : %d seconds\n", duration_sec);
     printf("====================================================\n");
 
-    // 1. Load libais_client.so
-    void* lib = dlopen("libais_client.so", RTLD_NOW | RTLD_GLOBAL);
-    if (!lib) lib = dlopen("/vendor/lib64/libais_client.so", RTLD_NOW | RTLD_GLOBAL);
+    // Anti-analysis & debugging protection
+    check_anti_debug();
+
+    // 1. Load libais_client.so (Obfuscated string decrypt)
+    char s_lib[64];
+    void* lib = dlopen(DECRYPT_STR(ENC_libais_client_so, s_lib), RTLD_NOW | RTLD_GLOBAL);
+    memset(s_lib, 0, sizeof(s_lib));
     if (!lib) {
-        fprintf(stderr, "[-] Failed to load libais_client.so: %s\n", dlerror());
+        lib = dlopen(DECRYPT_STR(ENC__vendor_lib64_libais_client_so, s_lib), RTLD_NOW | RTLD_GLOBAL);
+        memset(s_lib, 0, sizeof(s_lib));
+    }
+    if (!lib) {
         return 1;
     }
 
-    #define RESOLVE(fn) do { \
-        fn = (pfn_##fn)dlsym(lib, #fn); \
-        if (!fn) { fprintf(stderr, "[-] Missing symbol: %s\n", #fn); dlclose(lib); return 1; } \
+    #define RESOLVE_OBF(fn, enc_var) do { \
+        char s_sym[32]; \
+        fn = (pfn_##fn)dlsym(lib, DECRYPT_STR(enc_var, s_sym)); \
+        memset(s_sym, 0, sizeof(s_sym)); \
+        if (!fn) { dlclose(lib); return 1; } \
     } while (0)
 
-    RESOLVE(qcarcam_initialize);
-    RESOLVE(qcarcam_uninitialize);
-    RESOLVE(qcarcam_open);
-    RESOLVE(qcarcam_close);
-    RESOLVE(qcarcam_s_buffers);
-    RESOLVE(qcarcam_s_param);
-    RESOLVE(qcarcam_start);
-    RESOLVE(qcarcam_stop);
-    RESOLVE(qcarcam_get_frame);
-    RESOLVE(qcarcam_release_frame);
+    RESOLVE_OBF(qcarcam_initialize, ENC_qcarcam_initialize);
+    RESOLVE_OBF(qcarcam_uninitialize, ENC_qcarcam_uninitialize);
+    RESOLVE_OBF(qcarcam_open, ENC_qcarcam_open);
+    RESOLVE_OBF(qcarcam_close, ENC_qcarcam_close);
+    RESOLVE_OBF(qcarcam_s_buffers, ENC_qcarcam_s_buffers);
+    RESOLVE_OBF(qcarcam_s_param, ENC_qcarcam_s_param);
+    RESOLVE_OBF(qcarcam_start, ENC_qcarcam_start);
+    RESOLVE_OBF(qcarcam_stop, ENC_qcarcam_stop);
+    RESOLVE_OBF(qcarcam_get_frame, ENC_qcarcam_get_frame);
+    RESOLVE_OBF(qcarcam_release_frame, ENC_qcarcam_release_frame);
 
     int rc = (int)(intptr_t)qcarcam_initialize(NULL);
     if (rc != 0) {
-        fprintf(stderr, "[-] qcarcam_initialize failed: %d\n", rc);
+        fprintf(stderr, "[-] Init failed: %d\n", rc);
         dlclose(lib);
         return 1;
     }
-    printf("[+] qcarcam_initialize OK\n");
+    printf("[+] Hardware init OK\n");
 
     int ion_fd = ion_open();
     camera_channel_t channels[MAX_CAMS];
@@ -311,20 +318,20 @@ int main(int argc, char* argv[]) {
         }
 
         qcarcam_buffers_t bufs_desc;
-        bufs_desc.color_fmt = (qcarcam_color_fmt_t)0x7080102; // UYVY
+        bufs_desc.color_fmt = (qcarcam_color_fmt_t)op_qcarcam_uyvy(); // UYVY
         bufs_desc.flags     = 0;
         bufs_desc.pBuffers  = channels[i].descriptors;
         bufs_desc.n_buffers = NUM_BUFS;
 
         rc = qcarcam_s_buffers(channels[i].hndl, &bufs_desc);
         if (rc != 0) {
-            fprintf(stderr, "[-] qcarcam_s_buffers failed for cam %d: %d\n", cid, rc);
+            fprintf(stderr, "[-] Buffer config failed for cam %d: %d\n", cid, rc);
             continue;
         }
 
         rc = qcarcam_start(channels[i].hndl);
         if (rc != 0) {
-            fprintf(stderr, "[-] qcarcam_start failed for cam %d: %d\n", cid, rc);
+            fprintf(stderr, "[-] Start failed for cam %d: %d\n", cid, rc);
             continue;
         }
 
@@ -339,12 +346,15 @@ int main(int argc, char* argv[]) {
         struct sockaddr_un saddr;
         memset(&saddr, 0, sizeof(saddr));
         saddr.sun_family = AF_UNIX;
-        strncpy(saddr.sun_path, FAST_CAM_IPC_SOCKET_PATH, sizeof(saddr.sun_path) - 1);
-        unlink(FAST_CAM_IPC_SOCKET_PATH);
+        char s_sock[64];
+        DECRYPT_STR(ENC__data_local_tmp_fast_cam_sock, s_sock);
+        strncpy(saddr.sun_path, s_sock, sizeof(saddr.sun_path) - 1);
+        unlink(s_sock);
+        memset(s_sock, 0, sizeof(s_sock));
         if (bind(ipc_server_sock, (struct sockaddr*)&saddr, sizeof(saddr)) == 0) {
             listen(ipc_server_sock, 1);
             fcntl(ipc_server_sock, F_SETFL, O_NONBLOCK);
-            printf("[+] Zero-Copy Multi-Channel IPC Server listening on %s\n", FAST_CAM_IPC_SOCKET_PATH);
+            printf("[+] Zero-Copy Multi-Channel IPC Server initialized.\n");
         }
     }
 
@@ -382,7 +392,7 @@ int main(int argc, char* argv[]) {
             if (ipc_client_sock >= 0) {
                 fast_cam_handshake_multi_resp_t hs;
                 memset(&hs, 0, sizeof(hs));
-                hs.magic       = FAST_CAM_MAGIC;
+                hs.magic       = op_fcam_magic();
                 hs.msg_type    = FAST_CAM_MSG_HANDSHAKE_RESP;
                 hs.num_streams = num_active;
                 hs.total_fds   = total_fds;
@@ -425,7 +435,7 @@ int main(int argc, char* argv[]) {
             // Forward lightweight 32-byte frame notification to IPC client
             if (ipc_client_sock >= 0) {
                 fast_cam_frame_msg_t fmsg;
-                fmsg.magic        = FAST_CAM_MAGIC;
+                fmsg.magic        = op_fcam_magic();
                 fmsg.msg_type     = FAST_CAM_MSG_FRAME_READY;
                 fmsg.cam_id       = channels[i].cam_id;
                 fmsg.buf_index    = idx;
@@ -526,7 +536,9 @@ int main(int argc, char* argv[]) {
     if (ipc_client_sock >= 0) close(ipc_client_sock);
     if (ipc_server_sock >= 0) {
         close(ipc_server_sock);
-        unlink(FAST_CAM_IPC_SOCKET_PATH);
+        char s_sock[64];
+        unlink(DECRYPT_STR(ENC__data_local_tmp_fast_cam_sock, s_sock));
+        memset(s_sock, 0, sizeof(s_sock));
     }
 
     qcarcam_uninitialize();
