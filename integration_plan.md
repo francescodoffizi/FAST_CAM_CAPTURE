@@ -196,3 +196,18 @@ The `FastCamFrame` structure populated by `client.waitForFrame(&frame)` provides
 | `frame.stride` | `uint32_t` | Row stride in bytes (`3840`) |
 | `frame.timestamp_ns` | `uint64_t` | Hardware capture timestamp in nanoseconds |
 | `frame.pixels` | `const uint8_t*` | Direct pointer to the raw **UYVY** pixel buffer |
+
+---
+
+## 6. Dual-Pipeline Support: Live Monitoring vs 4K Ultra-HD Archiving
+
+`libfast_cam_client.so` provides high-performance C/C++ compositing routines directly out-of-the-box:
+
+1. **Standard Decimated 2x2 Mosaic (`FastCamClient::compose2x2`)**:
+   * Output: `1920x1300` UYVY canvas (downsampled by $2\times$ per camera).
+   * Intended for: Pad UI Live View, Web Remote Streaming, and 720p/1080p encoders (`c2.qti.avc.encoder`).
+2. **4K Ultra-HD Native Mosaic (`FastCamClient::compose4K`)**:
+   * Output: `3840x2600` UYVY canvas preserving **100% of native sensor pixels** (zero downsampling).
+   * Execution time: **~1.1 ms** via contiguous row `memcpy`.
+   * Intended for: Local Dashcam & Sentry Storage with Hardware HEVC encoder (`c2.qti.hevc.encoder` at 12 Mbps) for license plate and facial detail clarity.
+

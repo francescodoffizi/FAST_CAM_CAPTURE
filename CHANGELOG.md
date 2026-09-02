@@ -52,3 +52,8 @@ I rilasci verranno versionati in occasione del Version Bump.
   - Esecuzione continua di default (`duration_sec = 0`) per funzionamento ininterrotto come demone di background.
   - Aggiunto `-Wl,-soname,libfast_cam_client.so` nel `Makefile` per evitare path assoluti macOS in `DT_NEEDED`.
   - Aggiornato `integration_plan.md` con la gestione della modalità Mosaico 2x2 (`desired_cam == 4`) e il compositore UYVY per Overdrive.
+- Ottimizzazione Video 4K Nativa & Architettura Ibrida (`video_Improve.md`):
+  - Implementato algoritmo di composizione 4K nativo (`compose_4k_mosaic_uyvy` / `fast_cam_compose_4k`): quadro complessivo $3840 \times 2600$ UYVY con il 100% dei pixel dei sensori preservati (zero downsampling).
+  - Aggiunta l'opzione `--grid4k <file>` a `fast_cam_capture` per registrazione diretta 4K Ultra-HD.
+  - Esportate le funzioni di composizione C/C++ ad alte prestazioni (`fast_cam_compose_2x2` per streaming 1080p/720p e `fast_cam_compose_4k` per archiviazione 4K HEVC) in `libfast_cam_client.so` e `fast_cam_bridge.h` con piena retrocompatibilità.
+  - Aggiornato `integration_plan.md` per guidare i maintainer nell'adozione della strategia Dual-Pipeline (Live monitoring leggero a 720p vs Dashcam/Sentinella forense 4K HEVC a 12 Mbps).
