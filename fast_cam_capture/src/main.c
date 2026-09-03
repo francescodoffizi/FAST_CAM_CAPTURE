@@ -25,7 +25,7 @@
 #define FRAME_STRIDE  (FRAME_W * 2)
 #define FRAME_BYTES   (FRAME_W * FRAME_H * 2) // 4,992,000 bytes
 #define NUM_BUFS      5
-#define MAX_CAMS      4
+#define MAX_CAMS      FAST_CAM_MAX_CAMS
 
 // ION definitions
 struct IonAllocData {
@@ -197,6 +197,7 @@ static void compose_4k_mosaic_uyvy(
 int main(int argc, char* argv[]) {
     int single_cam = 0;
     bool all_cams = false;
+    const char* cams_arg = NULL;
     int duration_sec = 0; // Default: continuous daemon execution
     int record_fps = 30;
     const char* record_file = NULL;
@@ -205,7 +206,9 @@ int main(int argc, char* argv[]) {
     const char* sock_path = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "--cams") == 0 && i + 1 < argc) {
+            cams_arg = argv[++i];
+        } else if (strcmp(argv[i], "--cam") == 0 && i + 1 < argc) {
             single_cam = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--all") == 0) {
             all_cams = true;
@@ -225,8 +228,9 @@ int main(int argc, char* argv[]) {
             sock_path = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: %s [options]\n", argv[0]);
-            printf("  --cam <id>        Camera ID to capture [default: 0]\n");
-            printf("  --all             Open all 4 cameras (0:Front, 1:Right, 2:Rear, 3:Left)\n");
+            printf("  --cams <list>     Comma-separated camera IDs to capture (e.g. 8,9,5,4 or 0,1,2,3)\n");
+            printf("  --cam <id>        Single camera ID to capture [default: 0]\n");
+            printf("  --all             Open default 4 cameras (0:Front, 1:Right, 2:Rear, 3:Left)\n");
             printf("  --grid2x2 <file>  Compose and record 4 cameras into 2x2 grid video (1920x1300)\n");
             printf("  --grid4k <file>   Compose and record 4 cameras into 4K Ultra-HD video (3840x2600)\n");
             printf("  --time <sec>      Duration in seconds (0 = continuous daemon) [default: 0]\n");
@@ -246,7 +250,16 @@ int main(int argc, char* argv[]) {
     int active_cams[MAX_CAMS];
     int num_active = 0;
 
-    if (all_cams) {
+    if (cams_arg) {
+        char buf[128];
+        strncpy(buf, cams_arg, sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = '\0';
+        char* token = strtok(buf, ",");
+        while (token && num_active < MAX_CAMS) {
+            active_cams[num_active++] = atoi(token);
+            token = strtok(NULL, ",");
+        }
+    } else if (all_cams) {
         active_cams[0] = 0; // Front
         active_cams[1] = 1; // Right
         active_cams[2] = 2; // Rear
