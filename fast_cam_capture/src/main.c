@@ -478,6 +478,8 @@ int main(int argc, char* argv[]) {
     uint32_t grid_saved_frames = 0;
 
     uint64_t grid_interval_ns = 1000000000ULL / (record_fps > 0 ? record_fps : 30);
+    uint64_t last_successful_frame_ns = get_time_ns();
+    bool preempted_exit = false;
 
     while (g_running) {
         // Accept new IPC client and send all shared ION FDs via SCM_RIGHTS
@@ -510,6 +512,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        bool got_any_frame = false;
+
         // Poll each active camera
         for (int i = 0; i < num_active; i++) {
             if (!channels[i].active) continue;
@@ -520,6 +524,7 @@ int main(int argc, char* argv[]) {
             int ret = qcarcam_get_frame(channels[i].hndl, &fi, 1000000ULL, 0); // 1ms non-blocking poll
             if (ret != QCARCAM_RET_OK) continue;
 
+            got_any_frame = true;
             uint32_t idx = fi.buf_index;
             channels[i].latest_buf_idx = idx;
             channels[i].frames_count++;
@@ -552,6 +557,25 @@ int main(int argc, char* argv[]) {
 
             // Immediately release frame to hardware ring buffer
             qcarcam_release_frame(channels[i].hndl, idx);
+        }
+
+        if (got_any_frame) {
+            last_successful_frame_ns = get_time_ns();
+        } else {
+            // Smart backoff: don't spin 100% CPU when cameras are busy, in reverse or preempted
+            usleep(15000); // 15ms sleep (~60Hz poll)
+
+            // If no frame has arrived for > 1500ms after capture has started, the camera hardware
+            // has been preempted by native BYD 360/reverse view or system AVM.
+            // Exit cleanly with code 42 (PREEMPTED) to yield AIS to the native app.
+            uint64_t stalled_ns = get_time_ns() - last_successful_frame_ns;
+            if (total_frames > 0 && stalled_ns > 1500000000ULL) {
+                fprintf(stderr, "[!] AIS camera preempted by native app (stalled %.1fs). Yielding cleanly...\n",
+                        (double)stalled_ns / 1e9);
+                preempted_exit = true;
+                g_running = false;
+                break;
+            }
         }
 
         // 2x2 Grid Compositor Tick
@@ -664,5 +688,5 @@ int main(int argc, char* argv[]) {
     dlclose(lib);
 
     printf("[+] Done.\n");
-    return 0;
+    return preempted_exit ? 42 : 0;
 }
