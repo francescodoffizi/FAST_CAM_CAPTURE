@@ -1,7 +1,6 @@
 #include "fast_cam_bridge.h"
 #include "fast_cam_ipc.h"
 #include "fd_passing.h"
-#include "obfuscate.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,35 +63,28 @@ bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path) {
     socklen_t slen = 0;
     bool connected = false;
 
-    // 1. Connection attempt to provided path (abstract if starts with '@')
     if (sock_path && sock_path[0] == '@') {
         saddr.sun_path[0] = '\0';
         strncpy(saddr.sun_path + 1, sock_path + 1, sizeof(saddr.sun_path) - 2);
         slen = sizeof(sa_family_t) + strlen(sock_path);
-        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) {
-            connected = true;
-        }
+        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) connected = true;
     } else if (sock_path) {
         strncpy(saddr.sun_path, sock_path, sizeof(saddr.sun_path) - 1);
         slen = sizeof(sa_family_t) + strlen(saddr.sun_path) + 1;
-        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) {
-            connected = true;
-        }
+        if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) connected = true;
     }
 
-    // 2. Automatic fallback to abstract socket @fast_cam.sock if filesystem socket was blocked by SELinux
     if (!connected) {
+        // Fallback to abstract socket @fast_cam.sock
         memset(&saddr, 0, sizeof(saddr));
         saddr.sun_family = AF_UNIX;
-        char abs_name[32];
-        DECRYPT_STR(ENC_fast_cam_sock, abs_name);
+        const char* abs_name = "fast_cam.sock";
         saddr.sun_path[0] = '\0';
         memcpy(saddr.sun_path + 1, abs_name, strlen(abs_name));
         slen = sizeof(sa_family_t) + 1 + strlen(abs_name);
         if (connect(ctx->sock_fd, (struct sockaddr*)&saddr, slen) == 0) {
             connected = true;
         }
-        memset(abs_name, 0, sizeof(abs_name));
     }
 
     if (!connected) {
@@ -105,7 +97,7 @@ bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path) {
     int num_received = 0;
     int rc = recv_fds(ctx->sock_fd, ctx->received_fds, FAST_CAM_MAX_TOTAL_BUFS,
                       &num_received, &ctx->handshake, sizeof(ctx->handshake));
-    if (rc <= 0 || ctx->handshake.magic != op_fcam_magic()) {
+    if (rc <= 0 || ctx->handshake.magic != FAST_CAM_MAGIC) {
         fast_cam_client_disconnect(ctx);
         return false;
     }
@@ -121,6 +113,10 @@ bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path) {
     return true;
 }
 
+bool fast_cam_client_is_connected(const FastCamClientCtx* ctx) {
+    return ctx != NULL && ctx->sock_fd >= 0;
+}
+
 bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, int timeout_ms) {
     if (!ctx || ctx->sock_fd < 0 || !out_frame) return false;
 
@@ -131,9 +127,18 @@ bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, 
     int ret = poll(&pfd, 1, timeout_ms);
     if (ret <= 0) return false;
 
+    if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) {
+        fast_cam_client_disconnect(ctx);
+        return false;
+    }
+
     fast_cam_frame_msg_t msg;
     ssize_t n = recv(ctx->sock_fd, &msg, sizeof(msg), MSG_WAITALL);
-    if (n != sizeof(msg) || msg.magic != op_fcam_magic()) return false;
+    if (n <= 0) {
+        fast_cam_client_disconnect(ctx);
+        return false;
+    }
+    if (n != sizeof(msg) || msg.magic != FAST_CAM_MAGIC) return false;
 
     // Find the stream matching msg.cam_id
     uint32_t fd_idx = 0;
@@ -156,59 +161,4 @@ bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, 
     out_frame->pixels       = (const uint8_t*)ctx->mapped_ptrs[fd_idx];
 
     return true;
-}
-
-void fast_cam_compose_2x2(
-    const uint8_t* cam0, const uint8_t* cam1,
-    const uint8_t* cam3, const uint8_t* cam2,
-    uint8_t* out_grid_1080p
-) {
-    const int in_w = 1920;
-    const int in_h = 1300;
-    const int half_w = in_w / 2; // 960
-    const int half_h = in_h / 2; // 650
-    const int out_stride = in_w * 2; // 3840 bytes
-    const int in_stride  = in_w * 2; // 3840 bytes
-
-    for (int y = 0; y < half_h; y++) {
-        int src_y = y * 2;
-        const uint32_t* src0 = (const uint32_t*)(cam0 + src_y * in_stride);
-        const uint32_t* src1 = (const uint32_t*)(cam1 + src_y * in_stride);
-        uint32_t* dst_top = (uint32_t*)(out_grid_1080p + y * out_stride);
-
-        for (int x = 0; x < half_w / 2; x++) dst_top[x] = src0[x * 2];
-        for (int x = 0; x < half_w / 2; x++) dst_top[half_w / 2 + x] = src1[x * 2];
-
-        const uint32_t* src3 = (const uint32_t*)(cam3 + src_y * in_stride);
-        const uint32_t* src2 = (const uint32_t*)(cam2 + src_y * in_stride);
-        uint32_t* dst_bot = (uint32_t*)(out_grid_1080p + (half_h + y) * out_stride);
-
-        for (int x = 0; x < half_w / 2; x++) dst_bot[x] = src3[x * 2];
-        for (int x = 0; x < half_w / 2; x++) dst_bot[half_w / 2 + x] = src2[x * 2];
-    }
-}
-
-void fast_cam_compose_4k(
-    const uint8_t* cam0, const uint8_t* cam1,
-    const uint8_t* cam3, const uint8_t* cam2,
-    uint8_t* out_4k_grid
-) {
-    const int W = 1920;
-    const int H = 1300;
-    const size_t STRIDE_IN = W * 2;         // 3840 bytes
-    const size_t STRIDE_4K = W * 2 * 2;     // 7680 bytes
-
-    // 1. Top half: Cam 0 (Front) on Left, Cam 1 (Right) on Right
-    for (int y = 0; y < H; y++) {
-        uint8_t* dst_row = out_4k_grid + y * STRIDE_4K;
-        memcpy(dst_row, cam0 + y * STRIDE_IN, STRIDE_IN);
-        memcpy(dst_row + STRIDE_IN, cam1 + y * STRIDE_IN, STRIDE_IN);
-    }
-
-    // 2. Bottom half: Cam 3 (Left) on Left, Cam 2 (Rear) on Right
-    for (int y = 0; y < H; y++) {
-        uint8_t* dst_row = out_4k_grid + (H + y) * STRIDE_4K;
-        memcpy(dst_row, cam3 + y * STRIDE_IN, STRIDE_IN);
-        memcpy(dst_row + STRIDE_IN, cam2 + y * STRIDE_IN, STRIDE_IN);
-    }
 }
