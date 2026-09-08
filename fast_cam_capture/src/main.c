@@ -563,15 +563,15 @@ int main(int argc, char* argv[]) {
             last_successful_frame_ns = get_time_ns();
         } else {
             // Smart backoff: don't spin 100% CPU when cameras are busy, in reverse or preempted
-            usleep(15000); // 15ms sleep (~60Hz poll)
+            usleep(25000); // 25ms sleep (~40Hz poll)
 
-            // If no frame has arrived for > 1500ms after capture has started, the camera hardware
-            // has been preempted by native BYD 360/reverse view or system AVM.
+            // If no frame has arrived for > 1500ms after capture has started, or > 2500ms even if total_frames == 0,
+            // the camera hardware has been preempted by native BYD 360/reverse view or system AVM.
             // Exit cleanly with code 42 (PREEMPTED) to yield AIS to the native app.
             uint64_t stalled_ns = get_time_ns() - last_successful_frame_ns;
-            if (total_frames > 0 && stalled_ns > 1500000000ULL) {
-                fprintf(stderr, "[!] AIS camera preempted by native app (stalled %.1fs). Yielding cleanly...\n",
-                        (double)stalled_ns / 1e9);
+            if ((total_frames > 0 && stalled_ns > 1500000000ULL) || (stalled_ns > 2500000000ULL)) {
+                fprintf(stderr, "[!] AIS camera preempted by native app or unavailable (stalled %.1fs, frames=%u). Yielding cleanly...\n",
+                        (double)stalled_ns / 1e9, total_frames);
                 preempted_exit = true;
                 g_running = false;
                 break;
@@ -645,12 +645,22 @@ int main(int argc, char* argv[]) {
 
     if (fp_grid) {
         fclose(fp_grid);
+        fp_grid = NULL;
         free(grid_canvas);
+        grid_canvas = NULL;
         printf("[+] Saved 2x2 Grid Video: %u frames (%.2f MB) to %s\n",
                grid_saved_frames, (double)(grid_saved_frames * (uint64_t)FRAME_BYTES) / (1024.0 * 1024.0), grid_file);
     }
-    if (fp_rec) fclose(fp_rec);
-
+    if (fp_grid4k) {
+        fclose(fp_grid4k);
+        fp_grid4k = NULL;
+        free(grid4k_canvas);
+        grid4k_canvas = NULL;
+    }
+    if (fp_rec) {
+        fclose(fp_rec);
+        fp_rec = NULL;
+    }
     // Stop streams & clean up
     for (int i = 0; i < num_active; i++) {
         if (channels[i].active) {
@@ -672,16 +682,6 @@ int main(int argc, char* argv[]) {
             unlink(bound_sock_path);
         }
     }
-
-    if (fp_grid) {
-        fclose(fp_grid);
-        free(grid_canvas);
-    }
-    if (fp_grid4k) {
-        fclose(fp_grid4k);
-        free(grid4k_canvas);
-    }
-    if (fp_rec) fclose(fp_rec);
 
     qcarcam_uninitialize();
     if (ion_fd >= 0) close(ion_fd);
