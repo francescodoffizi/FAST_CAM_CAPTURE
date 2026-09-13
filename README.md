@@ -147,6 +147,8 @@ if (fast_cam_client_connect(ctx, NULL)) {
 fast_cam_client_destroy(ctx);
 ```
 
+Per la guida dettagliata all'integrazione sul veicolo e nei moduli Android JNI (incluso Overdrive), consulta la [Guida all'integrazione (docs/INTEGRATION.md)](docs/INTEGRATION.md).
+
 ---
 
 ## Licenza
