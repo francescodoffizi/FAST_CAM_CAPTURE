@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2026 Francesco D'Offizi
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "fast_cam_bridge.h"
 #include "fast_cam_ipc.h"
 #include "fd_passing.h"
@@ -19,6 +38,10 @@ struct FastCamClientCtx {
     void* mapped_ptrs[FAST_CAM_MAX_TOTAL_BUFS];
     fast_cam_handshake_multi_resp_t handshake;
 };
+
+const char* fast_cam_get_version(void) {
+    return FAST_CAM_VERSION;
+}
 
 FastCamClientCtx* fast_cam_client_create(void) {
     FastCamClientCtx* ctx = (FastCamClientCtx*)calloc(1, sizeof(FastCamClientCtx));

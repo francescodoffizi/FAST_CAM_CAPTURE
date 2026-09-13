@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2026 Francesco D'Offizi
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -47,7 +66,7 @@ int main(int argc, char* argv[]) {
     signal(SIGTERM, sig_handler);
 
     printf("====================================================\n");
-    printf(" Fast QCarCam Zero-Copy Consumer Client (C Test)\n");
+    printf(" Fast QCarCam Zero-Copy Client v%s (C Test)\n", FAST_CAM_VERSION);
     printf(" Connecting to : %s\n", sock_path);
     printf(" Duration      : %d seconds\n", test_duration);
     printf("====================================================\n");
