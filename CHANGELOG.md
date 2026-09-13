@@ -1,59 +1,26 @@
 # Changelog
 
-Tutte le modifiche e gli sviluppi del progetto sono annotati in questo file.
-I rilasci verranno versionati in occasione del Version Bump.
+Tutte le modifiche rilevanti a questo progetto saranno documentate in questo file.
 
-## [Unreleased] - 2026-09-02
+Il formato è basato su [Keep a Changelog](https://keepachangelog.com/it/1.0.0/).
 
-### Aggiunto
-- Analisi architetturale dei sottosistemi hardware/software dell'infotainment BYD DiLink 5.0 (Qualcomm SA8155P, Android 11 AAOS, Hypervisor QNX/Gunyah).
-- Identificazione della pipeline video a 8 canali (`/dev/video51`..`/dev/video58`, `ais_v4l2loopback_config.xml`).
-- Diagnosi del collo di bottiglia a 3-4 FPS di `qcarcam_test` (de-interlacing software CPU, display lock e buffer starvation).
-- Progettazione e implementazione del demone nativo C `fast_cam_capture`:
-  - Interfaccia diretta dinamica con `libais_client.so` e HAB (`/dev/hab`).
-  - Ring buffer circolare a 5 buffer ION da 1920x1300 UYVY (4.992.000 byte).
-  - Modalità Zero-Copy con rilascio immediato dei frame per evitare starvation dell'ISP.
-  - Benchmark FPS e latency in tempo reale.
-  - Flag `--copy` per confrontare le prestazioni con e senza memcpy software.
-  - Flag `--dump` per catturare singoli frame raw di test.
-- Diagnosi del collo di bottiglia IPC dell'hook preesistente:
-  - Rilevato stream socket con 36.000 syscall/s `sendto()` di 600 MB/s di dati grezzi che degradavano i 30 FPS hardware a 4.3 FPS sul consumatore Java.
-- Architettura Zero-Copy Inter-Process Communication (IPC):
-  - Creata interfaccia IPC `fast_cam_ipc.h` basata su socket UNIX locale (`/data/local/tmp/fast_cam.sock`).
-  - Condivisione dei file descriptor ION `dma-buf` tramite `sendmsg` con controllo ausiliario `SCM_RIGHTS` (`include/fd_passing.h`).
-  - Notifica istantanea lightweight dei frame (messaggio binario compatto di 32 byte anziché copia di 5 MB).
-  - Sviluppato client consumer di test `fast_cam_client` (`src/fast_cam_client.c`) per mappatura diretta in RAM condivisa senza carico CPU.
-- Motore Multi-Camera Indipendente (4 Canali Paralleli):
-  - Supporto per apertura concorrente di tutti i 4 sensori AVM (0: Frontale, 1: Destra, 2: Posteriore, 3: Sinistra).
-  - Gestione di ring buffer ION dedicati per ciascun canale con passaggio aggregato dei 20 FD via IPC.
-  - Risoluzione definitiva del formato pixel QCarCam (`0x7080102` = UYVY nativo) e heap ION `0x2000000` (system heap `1u << 25`).
-  - Raggiunto framerate di **29.98 FPS** su telecamera singola e **122.25 FPS aggregati** su 4 canali contemporanei.
-- Modulo di Registrazione Video e Composizione:
-  - Compositor 2x2 SIMD-friendly in spazio colore UYVY (4 quadranti: Front, Right, Left, Rear) a 30 FPS unificati su telaio 1920x1300.
-  - Registrazione e codifica H.264 MP4 a **30.00 FPS effettivi**:
-    - `cam0_5s_30fps.mp4` (Telecamera 0 frontale, 5 secondi a 30 FPS reali).
-    - `4cam_2s_30fps.mp4` (Griglia 2x2 delle 4 telecamere, 2 secondi a 30 FPS).
-- Pacchetto di Integrazione per i Maintainer di Overdrive (Binary Distribution):
-  - Redatto `integration_plan.md` con guida completa all'integrazione del demone e del bridge client C++ in Overdrive.
-  - Compilata la libreria condivisa client `build/libfast_cam_client.so` e definito l'header pubblico `include/fast_cam_bridge.h` per consentire ai maintainer di integrare lo stream a zero-copy senza esporre i sorgenti del demone.
-  - Pulizia completata su target `/data/local/tmp/`: rimossi i video raw temporanei (2,4 GB liberati) e i file obsoleti (`qcarcam_test`, `libhook_qcarcam.so`, `dilink5_cam_sidecar`, `4cam.xml`), mantenendo esclusivamente il nuovo binario nativo `fast_cam_capture`.
-- Hardening, Protezione Anti-Reverse Engineering & Versioning Git:
-  - Inizializzato repository Git con due release versionate:
-    - `v1.0.0-clean`: Versione sorgente pulita e non offuscata.
-    - `v1.0.0-hardened`: Versione di produzione protetta e offuscata.
-  - Implementato modulo di sicurezza `obfuscate.h`:
-    - Cifratura XOR delle stringhe a runtime con barriere volatili (zero riferimenti a `qcarcam`, `libais`, `/dev/ion`, socket nei comandi `strings`).
-    - Calcolo opaco a runtime delle costanti hardware proprietarie (`0x7080102`, `0x2000000`, `0x4643414D`).
-    - Hook di protezione anti-debug (`/proc/self/status` TracerPid check).
-    - Strip aggressivo di tutti i simboli interni con `llvm-strip --strip-all --discard-all` nel target `make release`.
-    - Validata l'esecuzione sul veicolo reale a 30 FPS su telecamera singola e 121 FPS su 4 telecamere.
-- Integrazione Correzioni Operative (`nec_mods.md`):
-  - Supporto Abstract UNIX Domain Socket (`@fast_cam.sock`) e fallback automatico in `main.c` e `fast_cam_bridge.cpp` per bypassare le restrizioni SELinux Enforcing.
-  - Esecuzione continua di default (`duration_sec = 0`) per funzionamento ininterrotto come demone di background.
-  - Aggiunto `-Wl,-soname,libfast_cam_client.so` nel `Makefile` per evitare path assoluti macOS in `DT_NEEDED`.
-  - Aggiornato `integration_plan.md` con la gestione della modalità Mosaico 2x2 (`desired_cam == 4`) e il compositore UYVY per Overdrive.
-- Ottimizzazione Video 4K Nativa & Architettura Ibrida (`video_Improve.md`):
-  - Implementato algoritmo di composizione 4K nativo (`compose_4k_mosaic_uyvy` / `fast_cam_compose_4k`): quadro complessivo $3840 \times 2600$ UYVY con il 100% dei pixel dei sensori preservati (zero downsampling).
-  - Aggiunta l'opzione `--grid4k <file>` a `fast_cam_capture` per registrazione diretta 4K Ultra-HD.
-  - Esportate le funzioni di composizione C/C++ ad alte prestazioni (`fast_cam_compose_2x2` per streaming 1080p/720p e `fast_cam_compose_4k` per archiviazione 4K HEVC) in `libfast_cam_client.so` e `fast_cam_bridge.h` con piena retrocompatibilità.
-  - Aggiornato `integration_plan.md` per guidare i maintainer nell'adozione della strategia Dual-Pipeline (Live monitoring leggero a 720p vs Dashcam/Sentinella forense 4K HEVC a 12 Mbps).
+## [Unreleased]
+
+## [1.0.0] - 2026-09-13
+
+### Added
+- Release iniziale v1.0.0 del sistema `fast_cam_capture`.
+- Architettura client/server IPC zero-copy via Unix domain socket e `dma-buf` file descriptor passing.
+- Shared library `libfast_cam_client.so` con API C/C++ ad alto livello (`fast_cam_client_create`, `fast_cam_client_poll_frame`, `fast_cam_get_version`).
+- Supporto cattura multi-camera sincronizzata (SA8155P DiLink 5.0).
+- Hardening dei binari, offuscamento stringhe sensibili e anti-debugging.
+- Adozione della licenza **GNU General Public License v3 (GPLv3)** con attribuzione del copyright all'autore originale (**Francesco D'Offizi**).
+- Creazione del file `LICENSE` con il testo ufficiale GPLv3.
+- Intestazioni di licenza e identificatori standard SPDX (`SPDX-License-Identifier: GPL-3.0-or-later`) su tutti i file sorgente (`.c`, `.cpp`) e header (`.h`).
+- Creazione del file `.gitignore` per escludere build artifacts, dump di test e binari locali.
+
+### Removed
+- Rimozione di binari proprietari estratti da terze parti (`qcarcam_test`, `libais_test_util_proprietary.so`, `libhook_qcarcam.so`, `lib/libais_client.so`) per conformità legale al rilascio pubblico.
+- Pulizia dei dump multimediali e registrazioni raw di test (`output/`).
+
+

@@ -1,21 +1,23 @@
-# Build artifacts
+# Build outputs and object files
 build/
 *.o
 *.so
 *.a
 
-# Video and raw capture files
+# Test captures and frame dumps
+output/
 *.uyvy
 *.mp4
-*.png
-*.jpg
 *.raw
-output/
-fast_cam_capture/output/
+*.png
 
-# macOS metadata
+# Proprietary / vehicle artifacts
+qcarcam_test
+lib/
+
+# OS and Editor metadata
 .DS_Store
-
-# Temporary files
-*.log
-*.tmp
+.idea/
+.vscode/
+*.swp
+*~
